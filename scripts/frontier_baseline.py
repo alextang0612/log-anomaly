@@ -51,35 +51,28 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from evaluate import report  # noqa: E402
 
 # --------------------------------------------------------------------------
-# The prompt. EDIT THIS -- it is week 3's actual work.
+# The prompt lives in prompts/system.txt, NOT in this file.
 #
-# The description below comes from the week-1 EDA. That sentence was written
-# for exactly this purpose: it is domain knowledge the model does not have, and
-# withholding it would make the baseline unfair rather than clean.
+# Prompt iteration is the bulk of week 3, so it belongs in a text file you can
+# edit freely and version in git. Keep old versions as prompts/system_v1.txt
+# etc. and record which produced which numbers -- that history is the
+# methodology section writing itself.
+#
+# The fallback below is only used if no prompt file is found.
 # --------------------------------------------------------------------------
-SYSTEM = """You are an expert site reliability engineer analysing HDFS \
-(Hadoop Distributed File System) logs.
+FALLBACK_SYSTEM = """You are an expert site reliability engineer analysing \
+HDFS logs. Decide whether a block's event sequence indicates a FAILURE.
 
-A "block" is a unit of data storage. Each block produces a sequence of log \
-events over its lifetime. Your job is to decide whether a block's event \
-sequence indicates a FAILURE.
+Answer with exactly one word, with no preamble: NORMAL or ANOMALY."""
 
-Background on normal behaviour:
-- A healthy block follows a consistent lifecycle: allocate -> receive -> \
-packet responder terminates -> blockMap updated -> eventually deleted.
-- Healthy blocks produce roughly 19 events. Fewer than 13 is unusual.
 
-Signals of failure:
-- The lifecycle truncates early and never completes.
-- The block requires re-replication or transfer to another datanode.
-- The write path throws an exception.
-- An unexpected error occurs deleting the block.
-
-Important: not every error-looking message indicates failure. \
-"Got exception while serving" appears in healthy blocks slightly more often \
-than in failed ones, and should not by itself trigger a FAILURE verdict.
-
-Answer with exactly one word: NORMAL or ANOMALY."""
+def load_system(path):
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as f:
+            text = f.read().strip()
+        if text:
+            return text, path
+    return FALLBACK_SYSTEM, "(built-in fallback -- no prompt file found)"
 
 USER_TEMPLATE = """Event sequence for one HDFS block:
 
@@ -155,8 +148,13 @@ def main() -> int:
                     help="$ per 1M input tokens (look it up)")
     ap.add_argument("--price-out", type=float, default=None,
                     help="$ per 1M output tokens")
+    ap.add_argument("--system-prompt", default="prompts/system.txt",
+                    help="file holding the system prompt. Edit that, not this script.")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
+
+    SYSTEM, sys_src = load_system(args.system_prompt)
+    print(f"  system prompt: {sys_src}  ({len(SYSTEM)} chars)")
 
     if not os.path.exists(args.input):
         print(f"ERROR: {args.input} not found.", file=sys.stderr)
