@@ -1,0 +1,185 @@
+# Log Anomaly Detection — small models vs frontier models
+
+> Servers produce millions of log lines a day, and buried in them are the handful
+> that mean something is broken. A big AI model like ChatGPT can spot those
+> reliably, but it's far too slow and expensive to run across millions of lines,
+> so nobody actually does it that way. I'm training my own small model to do that
+> one narrow job, then measuring it head to head against the big model — how much
+> accuracy do I give up, and how much cheaper and faster is it? I'm doing it
+> because my job right now is plugging existing AI models into things, and I want
+> to understand how they're actually built: the training, the data, the tradeoffs.
+
+**Status: in progress — week 3 of 16.** Data pipeline, evaluation harness and
+classical baselines are complete. Frontier-model and neural-model results are
+pending. Everything reported below is reproducible from this repo.
+
+---
+
+## Pipeline
+
+```mermaid
+flowchart LR
+  A["HDFS.log<br/>11.2M lines"] --> B["Drain3<br/>31 templates"]
+  B --> C["Sessions<br/>575,061 sequences"]
+  C --> D["Chronological<br/>split"]
+  D --> E["Classical<br/>baselines"]
+  D --> F["Frontier model<br/>(API)"]
+  D --> G["Transformer<br/>(local GPU)"]
+  E --> H["Comparison:<br/>accuracy + cost"]
+  F --> H
+  G --> H
+```
+
+Raw log lines are parsed into event *templates*, grouped into one sequence per
+HDFS block, split by time, and fed to every approach identically.
+
+---
+
+## The headline finding so far
+
+**HDFS, the most-cited benchmark in log anomaly detection, is near-saturated.**
+
+| Approach | Precision | Recall | F1 | PR-AUC |
+|---|---|---|---|---|
+| Length only (`len < 13`) | 1.0000 | 0.2763 | 0.4330 | — |
+| Naive keyword (`error`/`exception`) | 1.0000 | 0.6688 | 0.8016 | — |
+| Evidence-based rules | 0.9055 | 0.8454 | 0.8744 | — |
+| **Lookup table (pure memorisation)** | 1.0000 | 0.8507 | **0.9193** | — |
+| **TF-IDF + logistic regression** | 0.9935 | 0.9973 | **0.9954** | 0.9997 |
+| Frontier model | — | — | *pending* | — |
+| This project's model | — | — | *pending* | — |
+
+*Validation split, natural class ratio (3.02% anomalous). Accuracy is deliberately
+not reported — at a 2.93% positive rate, always predicting "normal" scores 97%.*
+
+**Why a dictionary scores 0.92:**
+
+```
+distinct sequences in training:                 17,458   (from 402,549 blocks)
+validation sequences seen verbatim in training: 99.2%
+```
+
+Across 575,061 blocks there are only ~17k distinct behaviours. Memorising
+training sequences and looking up new ones achieves F1 0.9193 with **perfect
+precision** — no model, no features, no training.
+
+Every error that lookup makes is a sequence it has never seen:
+
+```
+unseen sequences in validation:   674
+  of which anomalous:             389   (57.7%, vs a 2.93% base rate)
+lookup's missed anomalies:        389   (exact match)
+```
+
+So the task decomposes into a dictionary (99.2% of blocks) plus a novelty
+problem (0.8%). Logistic regression beats lookup precisely because it
+generalises over marker templates to sequences it has not seen.
+
+**Consequence:** accuracy comparisons on HDFS cannot meaningfully distinguish
+model architectures — the headroom above a 1990s technique is under 0.005. The
+project therefore uses HDFS to measure **cost at controlled accuracy**, and adds
+BGL to answer whether architecture matters at all.
+
+This is consistent with published critiques of these benchmarks
+([Landauer et al., FSE 2024](https://dl.acm.org/doi/10.1145/3660768);
+[Le & Zhang, *How Far Are We?*](https://arxiv.org/pdf/2202.04301)) and was
+reproduced here independently.
+
+---
+
+## Methodology notes
+
+**Chronological split, verified in code.** Train on earlier data, validate and
+test on later. Boundaries are snapped so no timestamp spans two splits, and
+non-overlap is asserted rather than assumed. A random split would let the model
+train on events that happened *after* those it is tested on.
+
+The split surfaced a real distribution shift: **the test window has 1.29%
+anomalies against training's 3.26%.** A random split would have produced three
+tidy 2.93% slices and hidden it.
+
+**The parser's similarity threshold was tuned, not defaulted.** At Drain3's
+default `sim_th=0.4`, the template
+
+```
+PacketResponder <NUM> for block <BLK> <*>     ← 1,706,728 lines
+```
+
+silently merged two different events — 1,706,679 `terminating` (success) with 49
+`Interrupted.` (failure). Every summary statistic was correct while this was
+true; only reading the templates by hand caught it. Raised to 0.85 after
+verifying the high-frequency templates were unaffected.
+
+**Exception subtypes are grouped deliberately.** Twenty templates differing only
+by Java exception class were collapsed to one. A template occurring once in 11.2M
+lines cannot produce a useful embedding, and an unseen exception class at
+inference time would otherwise become an out-of-vocabulary token.
+
+**No accuracy metric exists in the harness.** It is not hidden behind a flag; it
+is absent.
+
+---
+
+## Reproducing
+
+Requires an NVIDIA GPU for the training phases; everything above runs on CPU.
+
+```bash
+# 1. get the data
+#    HDFS_v1.zip from https://zenodo.org/records/8196385 -> data/raw/
+
+# 2. environment
+uv venv --python 3.11 && source .venv/bin/activate
+uv pip install torch drain3 scikit-learn numpy
+
+# 3. parse 11.2M lines into 575k labelled sequences   (~1 min)
+python scripts/parse_logs.py
+python scripts/inspect_templates.py        # manual review gate
+
+# 4. explore
+python scripts/explore_sessions.py
+
+# 5. split and baseline
+python scripts/make_split.py
+python scripts/baselines.py
+```
+
+| Script | Purpose |
+|---|---|
+| `parse_logs.py` | Drain3 parsing → per-block template sequences |
+| `inspect_templates.py` | Manual template review gate |
+| `explore_sessions.py` | Class-conditional EDA |
+| `make_split.py` | Chronological train/val/test split |
+| `evaluate.py` | Metrics harness (no accuracy) |
+| `baselines.py` | Length, keyword, rules, TF-IDF + LR |
+| `sample_sessions.py` | Sampling + raw-line extraction for prompting |
+| `frontier_baseline.py` | Frontier-model runner with cost tracking |
+
+---
+
+## Roadmap
+
+| Weeks | Phase | Status |
+|---|---|---|
+| 1–2 | Data, parsing, baselines | ✅ complete |
+| 3–4 | Frontier-model cost baseline | in progress |
+| 5 | BGL data + saturation check | |
+| 6–9 | Train and ablate | |
+| 10–12 | Quantisation, profiling, throughput | |
+| 13–16 | Serve, deploy, write up | |
+
+Full plan: [`docs/roadmap-revised.md`](docs/roadmap-revised.md).
+Findings: [`docs/week1-findings.md`](docs/week1-findings.md),
+[`docs/week2-findings.md`](docs/week2-findings.md).
+
+---
+
+## Data
+
+HDFS_v1 from [LogHub / LogPAI](https://github.com/logpai/loghub). Free for
+research and academic use.
+
+- Xu, Huang, Fox, Patterson, Jordan. *Detecting Large-Scale System Problems by
+  Mining Console Logs.* SOSP 2009.
+- Zhu, He, He, Liu, Lyu. *Loghub: A Large Collection of System Log Datasets for
+  AI-driven Log Analytics.* ISSRE 2023.
