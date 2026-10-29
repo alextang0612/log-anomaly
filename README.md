@@ -9,9 +9,10 @@
 > because my job right now is plugging existing AI models into things, and I want
 > to understand how they're actually built: the training, the data, the tradeoffs.
 
-**Status: in progress — week 3 of 16.** Data pipeline, evaluation harness and
-classical baselines are complete. Frontier-model and neural-model results are
-pending. Everything reported below is reproducible from this repo.
+**Status: in progress — week 5 of 16.** Data pipeline, evaluation harness,
+classical baselines and the frontier-model baseline are complete. The project's
+own trained model is pending. Everything reported below is reproducible from
+this repo.
 
 ---
 
@@ -35,22 +36,66 @@ HDFS block, split by time, and fed to every approach identically.
 
 ---
 
-## The headline finding so far
+## Results so far
 
-**HDFS, the most-cited benchmark in log anomaly detection, is near-saturated.**
-
-| Approach | Precision | Recall | F1 | PR-AUC |
+| Approach | Precision | Recall | F1 | Cost / 1M lines |
 |---|---|---|---|---|
-| Length only (`len < 13`) | 1.0000 | 0.2763 | 0.4330 | — |
-| Naive keyword (`error`/`exception`) | 1.0000 | 0.6688 | 0.8016 | — |
-| Evidence-based rules | 0.9055 | 0.8454 | 0.8744 | — |
-| **Lookup table (pure memorisation)** | 1.0000 | 0.8507 | **0.9193** | — |
-| **TF-IDF + logistic regression** | 0.9935 | 0.9973 | **0.9954** | 0.9997 |
-| Frontier model | — | — | *pending* | — |
-| This project's model | — | — | *pending* | — |
+| **TF-IDF + logistic regression** | 0.9935 | 0.9973 | **0.9954** | ~$0 |
+| **Rules v2** (hand-written conditionals) | 0.9164 | 0.9716 | **0.9432** | **~$0** |
+| **Claude Haiku 5.5**, expert prompt | 0.9091 | 0.9756 | **0.9412** | **$8.15** |
+| **Claude Sonnet 5.5**, expert prompt | 0.9091 | 0.9756 | **0.9412** | **$124.29** |
+| Lookup table (pure memorisation) | 1.0000 | 0.8507 | 0.9193 | ~$0 |
+| Rules v1 (marker templates only) | 0.9055 | 0.8454 | 0.8744 | ~$0 |
+| **Claude Sonnet 5.5**, bare prompt | 0.9630 | 0.7927 | **0.8696** | **$75.72** |
+| Naive keyword (`error`/`exception`) | 1.0000 | 0.6688 | 0.8016 | ~$0 |
+| Length only (`len < 13`) | 1.0000 | 0.2763 | 0.4330 | ~$0 |
+| This project's trained model | — | — | *pending* | *pending* |
 
-*Validation split, natural class ratio (3.02% anomalous). Accuracy is deliberately
-not reported — at a 2.93% positive rate, always predicting "normal" scores 97%.*
+*Validation split, natural class ratio. Frontier rows measured on a random 5,000-session
+subset (164 anomalies); other rows on all 86,254. Accuracy is deliberately not reported —
+at a 2.93% positive rate, always predicting "normal" scores 97%.*
+
+---
+
+## Two findings
+
+### 1. The frontier model's performance is the prompt, not the model
+
+| What the model was given | F1 | Cost / 1M lines |
+|---|---|---|
+| A bare instruction ("is this block broken?") | 0.8696 | $75.72 |
+| The same instruction plus domain knowledge from EDA | 0.9412 | $124.29 |
+| **That knowledge expressed as code instead** | **0.9432** | **~$0** |
+
+Domain knowledge is worth +0.072 F1. The model adds nothing beyond it — given the
+same knowledge, forty lines of conditional logic match it, at no cost and in
+microseconds instead of 1.2 seconds. The expert prompt also costs **64% more** than
+the bare one, because the rules make the prompt longer.
+
+Without domain knowledge the model fails by *missing* anomalies, not by crying wolf:
+precision rises to 0.9630 while recall falls to 0.7927. For an on-call detector that
+is the expensive direction to be wrong in.
+
+### 2. Model capability is irrelevant when the prompt is a decision procedure
+
+Sonnet 5.5 and Haiku 5.5, given the same expert prompt, produced **identical
+predictions on all 5,000 sessions** — the same verdict on every block, including all
+16 false alarms and all 4 misses. The two models differ by ~15× in measured cost.
+
+> If a prompt is specific enough to be reliable, it is probably specific enough to be code.
+
+### Latency makes the point without reference to money
+
+At 1.21 s per session, classifying all 575,061 blocks is **193 hours of serial API
+time** — eight days to analyse 38 hours of logs from one cluster. Even at the
+concurrency sustained here, 25 hours. Not expensive: impossible.
+
+---
+
+## The benchmark is near-saturated
+
+**HDFS, the most-cited benchmark in log anomaly detection, is close to solved by
+memorisation.**
 
 **Why a dictionary scores 0.92:**
 
@@ -153,7 +198,9 @@ python scripts/baselines.py
 | `evaluate.py` | Metrics harness (no accuracy) |
 | `baselines.py` | Length, keyword, rules, TF-IDF + LR |
 | `sample_sessions.py` | Sampling + raw-line extraction for prompting |
-| `frontier_baseline.py` | Frontier-model runner with cost tracking |
+| `frontier_baseline.py` | Frontier-model runner with measured cost tracking |
+
+Prompts are versioned in `prompts/` alongside the results each produced.
 
 ---
 
@@ -162,15 +209,16 @@ python scripts/baselines.py
 | Weeks | Phase | Status |
 |---|---|---|
 | 1–2 | Data, parsing, baselines | ✅ complete |
-| 3–4 | Frontier-model cost baseline | in progress |
-| 5 | BGL data + saturation check | |
+| 3–4 | Frontier-model cost baseline | ✅ complete |
+| 5 | BGL data + saturation check | in progress |
 | 6–9 | Train and ablate | |
 | 10–12 | Quantisation, profiling, throughput | |
 | 13–16 | Serve, deploy, write up | |
 
 Full plan: [`docs/roadmap-revised.md`](docs/roadmap-revised.md).
 Findings: [`docs/week1-findings.md`](docs/week1-findings.md),
-[`docs/week2-findings.md`](docs/week2-findings.md).
+[`docs/week2-findings.md`](docs/week2-findings.md),
+[`docs/week4-findings.md`](docs/week4-findings.md).
 
 ---
 
