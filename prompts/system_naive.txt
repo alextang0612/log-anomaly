@@ -1,0 +1,7 @@
+You are analysing logs from HDFS (Hadoop Distributed File System).
+
+Below is the complete sequence of log events produced by one storage block over its lifetime.
+
+Decide whether this block experienced a failure.
+
+Answer with exactly one word, with no preamble: NORMAL or ANOMALY.

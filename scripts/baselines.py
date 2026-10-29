@@ -91,6 +91,55 @@ def rules_predict(seqs, templates):
     return out
 
 
+# --------------------------------------------------------------------------
+# Rules v2 -- FAIRNESS FIX.
+#
+# The frontier-model prompt was given marker templates PLUS the length rule,
+# truncation, and the post-delete lifecycle violation. The v1 rules baseline
+# was given only the marker templates. Comparing them was unfair to the rules.
+#
+# v2 gives the rules baseline exactly the signal set the prompt has, so the
+# comparison measures the APPROACH rather than who was told more.
+#
+# Template IDs below are from the 31-template parse (sim_th=0.85, grouped
+# exceptions). If you re-parse, re-check them.
+# --------------------------------------------------------------------------
+T_RECEIVED_BLOCK = 4     # Received block <BLK> of size <NUM> from <IP>
+T_ADDSTORED = 5          # addStoredBlock: blockMap updated
+T_DELETING = 16          # Deleting block <BLK> file <PATH>
+T_NS_DELETE = 24         # NameSystem.delete: added to invalidSet
+T_TIMEOUT = 30           # PendingReplicationMonitor timed out
+T_TRANSFER = 12          # Starting thread to transfer block
+
+MIN_NORMAL_LENGTH = 13   # no normal block in TRAIN has fewer than this
+
+
+def rules_v2_predict(seqs, templates):
+    """Marker templates + length + truncation + lifecycle-order violation."""
+    out = []
+    extended = set(templates) | {T_TIMEOUT, T_TRANSFER}
+    for s in seqs:
+        seq = [int(x) for x in s.split()] if s else []
+        ids = set(seq)
+
+        if ids & extended:                       # any marker template
+            out.append(1); continue
+        if len(seq) < MIN_NORMAL_LENGTH:         # definitively short
+            out.append(1); continue
+        if not (ids & {T_RECEIVED_BLOCK, T_ADDSTORED}):   # never completed
+            out.append(1); continue
+
+        # lifecycle violation: block re-registered AFTER being deleted
+        first_delete = next((i for i, t in enumerate(seq)
+                             if t in (T_NS_DELETE, T_DELETING)), None)
+        if first_delete is not None and any(
+                t == T_ADDSTORED for t in seq[first_delete:]):
+            out.append(1); continue
+
+        out.append(0)
+    return out
+
+
 def naive_keyword_predict(seqs, tmpl_text):
     """The rule an ops team writes on day one: flag anything with 'exception'
     or 'error' in it. Included to show why evidence beats intuition."""
@@ -159,6 +208,14 @@ def main() -> int:
                            f"{sorted(RULE_TEMPLATES)})",
                            yev, rules_predict(sev, RULE_TEMPLATES),
                            notes="same idea, but chosen from measured class rates")))
+
+    # 2c. rules with the SAME signals the frontier prompt was given
+    results.append(("Rules v2 (prompt-equivalent signals)",
+                    report("2c. RULES v2  (markers + length + truncation + "
+                           "lifecycle order)",
+                           yev, rules_v2_predict(sev, RULE_TEMPLATES),
+                           notes="given exactly what the frontier prompt was "
+                                 "told -- this is the fair comparison")))
 
     # 3. TF-IDF + logistic regression
     try:
