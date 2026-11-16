@@ -225,8 +225,8 @@ week, what was found, and what was decided.** Start there.
 
 Full plan: [`docs/roadmap-revised.md`](docs/roadmap-revised.md). Detailed
 findings per week: [week 1](docs/week1-findings.md),
-[week 2](docs/week2-findings.md), [week 4](docs/week4-findings.md),
-[week 5](docs/week5-findings.md).
+[week 2](docs/week2-findings.md), [week 3](docs/week3-findings.md),
+[week 4](docs/week4-findings.md), [week 5](docs/week5-findings.md).
 
 ---
 

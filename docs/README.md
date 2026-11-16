@@ -52,6 +52,26 @@ and a second dataset was added to answer the accuracy question properly.
 
 ## Weeks 3–4 — What does a frontier model actually buy you?
 
+**[week3-findings.md](week3-findings.md)** · giving the model a fair shot
+
+Before measuring a frontier model you have to prompt it properly, or the
+comparison is rigged and worthless. This week iterated the prompt on training
+data until it was genuinely good.
+
+**What was found:** three separate ways to fool yourself, all caught. An output
+limit silently dropped 10% of responses — and specifically the hardest 10%,
+since those were the ones the model thought longest about; reported recall was
+0.93 when the honest figure was 0.88. Tuning the prompt by reading its mistakes
+and then scoring it on those same examples produced a perfect 1.0000 that meant
+nothing. And the prompt was being compared against a rules baseline that had been
+told *less* than the prompt had — unfair in this project's own favour.
+
+**Decided:** validate every prompt on examples it was never tuned against, move
+prompts into version-controlled text files, and level the rules baseline up to
+the same information the prompt gets rather than quietly enjoying the advantage.
+
+---
+
 **[week4-findings.md](week4-findings.md)** · the LLM baseline, measured
 
 Ran Claude Sonnet 5.5 and Claude Haiku 5.5 over 5,000 held-out sessions,
@@ -129,7 +149,7 @@ caught only by a human reading the output:
 | Week | Error | What the statistics said |
 |---|---|---|
 | 1 | A failure event merged into a success event | Block counts, label joins and anomaly rate all exactly correct |
-| 4 | An output cap silently dropped 10% of model responses — and specifically the hardest 10% | Clean metrics on an unknowingly truncated sample |
+| 3 | An output cap silently dropped 10% of model responses — and specifically the hardest 10% | Clean metrics on an unknowingly truncated sample |
 | 5 | One event split across two templates by number formatting | 4.7M lines parsed, 0 unparsed, alert rate matching the published figure |
 
 Aggregate statistics cannot detect semantic errors. That is the methodological
