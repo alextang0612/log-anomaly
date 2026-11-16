@@ -9,10 +9,15 @@
 > because my job right now is plugging existing AI models into things, and I want
 > to understand how they're actually built: the training, the data, the tradeoffs.
 
-**Status: in progress — week 5 of 16.** Data pipeline, evaluation harness,
-classical baselines and the frontier-model baseline are complete. The project's
-own trained model is pending. Everything reported below is reproducible from
-this repo.
+**Status: in progress — week 6 of 16.** Data pipeline, evaluation harness,
+classical baselines, the frontier-model baseline and a second dataset are
+complete. The project's own trained model is next. Everything reported below is
+reproducible from this repo.
+
+Two datasets, two questions. **HDFS** turned out to be near-saturated — every
+method clusters around 0.94–0.99 — so it measures *cost at controlled accuracy*.
+**BGL**, grouped into chronological 30-minute windows, is genuinely hard
+(trivial baselines reach only 0.36) and is where model design gets tested.
 
 ---
 
@@ -210,15 +215,18 @@ Prompts are versioned in `prompts/` alongside the results each produced.
 |---|---|---|
 | 1–2 | Data, parsing, baselines | ✅ complete |
 | 3–4 | Frontier-model cost baseline | ✅ complete |
-| 5 | BGL data + saturation check | in progress |
+| 5 | BGL data + saturation check | ✅ complete — BGL is genuinely hard (trivial baseline F1 0.36) |
 | 6–9 | Train and ablate | |
 | 10–12 | Quantisation, profiling, throughput | |
 | 13–16 | Serve, deploy, write up | |
 
-Full plan: [`docs/roadmap-revised.md`](docs/roadmap-revised.md).
-Findings: [`docs/week1-findings.md`](docs/week1-findings.md),
-[`docs/week2-findings.md`](docs/week2-findings.md),
-[`docs/week4-findings.md`](docs/week4-findings.md).
+**[`docs/README.md`](docs/README.md) — a plain-language log of what happened each
+week, what was found, and what was decided.** Start there.
+
+Full plan: [`docs/roadmap-revised.md`](docs/roadmap-revised.md). Detailed
+findings per week: [week 1](docs/week1-findings.md),
+[week 2](docs/week2-findings.md), [week 4](docs/week4-findings.md),
+[week 5](docs/week5-findings.md).
 
 ---
 
